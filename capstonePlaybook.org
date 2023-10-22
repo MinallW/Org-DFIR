@@ -1,0 +1,649 @@
+#+title: Capstone Playbook
+
+* Introducción
+
+|--------+-------------------------------------------------------+------------|
+| Número | Acción                                                | Estado     |
+|--------+-------------------------------------------------------+------------|
+|        | Detección y Análisis                                  | Completado |
+|--------+-------------------------------------------------------+------------|
+|      1 | Determinar si se ha producido un incidente            | Completado |
+|    1.1 | Analizar los precursores e indicadores                | Completado |
+|    1.2 | Buscar información correlativa                        | Completado |
+|    1.3 | Realizar investigación                                | Completado |
+|    1.4 | Comienzo del posible incidente                        | Completado |
+|      2 | Priorizar el incidente                                | Completado |
+|      3 | Informar del incidente interna y externamente         | Completado |
+|--------+-------------------------------------------------------+------------|
+|        | Erradicación, Contención y Recuperación               | Completado |
+|--------+-------------------------------------------------------+------------|
+|      4 | Adquirir, Preservar, Asegurar y Documentar Evidencia  | Completado |
+|      5 | Contener el Incidente                                 | Completado |
+|      6 | Erradicar el Incidente                                | Completado |
+|    6.1 | Identificar y mitigar las vulnerabilidades            | Completado |
+|    6.2 | Eliminar malware y otros componentes                  | Completado |
+|    6.3 | Si existen más hosts infectados, repetir el proceso   | Completado |
+|      7 | Recuperación del Incidente                            | Completado |
+|    7.1 | Dejar los sistemas afectados en un estado operativo   | Completado |
+|    7.2 | Confirmar el funcionamiento de los sistemas afectados | Completado |
+|    7.2 | Si es necesario, aplicar monitoreo                    | Completado |
+|--------+-------------------------------------------------------+------------|
+|        | Actividad Post-Incidente                              | Completado |
+|--------+-------------------------------------------------------+------------|
+|      8 | Crear un informe de seguimiento                       | Completado |
+|      9 | Realizar una reunión de lecciones aprendidas          | Completado |
+|        |                                                       |            |
+|--------+-------------------------------------------------------+------------|
+* Desarrollo
+:PROPERTIES:
+:header-args:         :dir /ssh:INTOTHESERVERthroughTRAMPevenwithSUDO:
+:END:
+
+El equipo de respuesta a incidentes ha sido contactado por un administrador de
+sistemas, que nos contacta al encontrar un archivo desconocido posiblemente
+malicioso en el sistema. Realizaremos comprobaciones iniciales y confirmaremos
+si se trata de una incidencia.
+
+** Detección y Análisis
+
+Los primeros pasos es conocer un poco más del servidor, conectarse a él
+conectarse a él y ver su estado. Los siguientes comandos son recomendables para
+un primer chequeo.
+
+Investigamos la lista de usuarios por si hubo algún cambio.
+
+#+begin_src shell
+sort -nk3 -t: /etc/passwd
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+.....
+systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin
+admin:x:1000:1000:Debian:/home/admin:/bin/bash
+libvirt-qemu:x:64055:103:Libvirt Qemu,,,:/var/lib/libvirt:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+.....
+#+end_src
+
+No notamos nada fuera de lo común. Buscamos por archivos huérfanos, lo que
+podría indicar que fue creado un usuario y eliminado, dejando una traza de
+archivos maliciosos:
+
+#+begin_src shell :async t
+find / -nouser -print
+#+end_src
+
+Afortunadamente, no tenemos respuesta. Obtenemos el uptime para la
+documentación, además de la memoria y detalles del disco.
+
+#+begin_src shell
+date
+echo "Uptime"
+uptime
+echo "Memory"
+free -h
+echo "Disk"
+df
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+Tue Oct  3 06:50:50 PM UTC 2023
+Uptime
+ 18:50:50 up 6 days,  1:50,  3 users,  load average: 0.01, 0.02, 0.00
+Memory
+               total        used        free      shared  buff/cache   available
+Mem:           3.8Gi       1.7Gi       817Mi       472Ki       1.7Gi       2.2Gi
+Swap:             0B          0B          0B
+Disk
+Filesystem     1K-blocks    Used Available Use% Mounted on
+udev             1998152       0   1998152   0% /dev
+tmpfs             402304     472    401832   1% /run
+/dev/xvda1       8025124 5027176   2568740  67% /
+tmpfs            2011520       0   2011520   0% /dev/shm
+tmpfs               5120       0      5120   0% /run/lock
+/dev/xvda15       126678   11816    114862  10% /boot/efi
+tmpfs             402304       0    402304   0% /run/user/1000
+#+end_src
+
+No vemos nada fuera de lo común. Por lo que podemos intuir que el problema
+estará relacionado solo al servicio. Obtengamos una lista de procesos para estar
+seguros de que no hay nada extraño en el servidor, es decir, una intrusión.
+
+#+begin_src shell
+ps -aux
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+...
+root       23425  0.0  0.2  17480 10748 ?        Ss   18:47   0:00 sshd: admin [
+admin      23432  0.0  0.1  17640  6600 ?        S    18:47   0:00 sshd: admin@p
+root       23433  0.0  0.1   9772  4568 pts/1    Ss+  18:47   0:00 sudo -u root
+root       23744  0.0  0.1  11056  4380 pts/2    R+   18:51   0:00 ps -aux
+...
+#+end_src
+
+Nada fuera de lo común. Podemos omitir cualquier chequeo específico por los
+archivos, e irnos hacia la red. Lo siguiente solo tiene sentido si el
+dispositivo cuenta con dispositivos inalámbricos como WIFI o Bluetooth, ya que
+el modo promiscuo es muy utilizado para espiar la data.
+
+#+begin_src shell
+ip link | grep PROMISC
+#+end_src
+
+Busquemos los cron jobs configurados, de los cuales debe de existir un
+historial, para contar con una base en la que podamos confiar. Podemos usar
+crontab si está instalado.
+
+#+begin_src shell
+ls /etc/cron.*
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+/etc/cron.d:
+e2scrub_all
+
+/etc/cron.daily:
+apt-compat  dpkg  logrotate  man-db
+
+/etc/cron.weekly:
+man-db
+#+end_src
+
+Luego de estos cortos chequeos iniciales, podemos estar más seguros de que no existe
+intrusión, procederemos a ver el estado del servicio.
+
+#+begin_src shell
+systemctl status API
+#+end_src
+
+Al darse cuenta que el servicio está detenido, debemos de revisare el archivo de
+configuración para este servicio en =systemd= para así ir directamente a este
+servicio en el sistema.
+
+#+begin_src shell
+cat /etc/systemd......
+#+end_src
+
+Luego de esto, identificamos que el servicio se encuentra en:
+
+#+begin_src shell
+ls /home/admin/Very-Insecure-API/
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+bun.lockb   index.ts	  package.json	tsconfig.json
+index.html  node_modules  README.md
+#+end_src
+
+Luego de revisar los contenidos, revisamos el archivo principal =index.ts=.
+
+#+begin_src shell
+cat /home/admin/Very-Insecure-API/index.ts
+#+end_src
+
+#+RESULTS:
+#+begin_src js
+const server = Bun.serve({
+  port: 3000,
+  async fetch(req) {
+    const url = new URL(req.url);
+
+    // return index.html for root path
+    if (url.pathname === "/")
+      return new Response(Bun.file("index.html"), {
+        headers: {
+          "Content-Type": "text/html",
+        },
+      });
+
+    if (url.pathname === "/action") {
+      const formdata = await req.formData();
+      const name = formdata.get("name");
+      const profilePicture = formdata.get("profilePicture");
+
+      // check if a file was uploaded
+      if (!profilePicture) throw new Error("Must upload a profile picture.");
+
+      // check if the file has a name
+      if (!name) throw new Error("The file must have a name.");
+
+      // write the file to disk
+      await Bun.write(name, profilePicture);
+
+      await Bun.spawn(["tar", "-xzvf", name]);
+
+      return new Response("Success");
+    }
+
+    if (url.pathname === "/command") {
+      const formdata = await req.formData();
+      const command = formdata.get("command");
+      const commands = command.split(" ");
+
+      const proc = Bun.spawn(commands);
+
+      const output = await new Response(proc.stdout).text();
+
+      return new Response(output);
+    }
+
+    return new Response("Not Found", { status: 404 });
+  },
+});
+
+console.log(`Listening on http://localhost:${server.port}`);
+#+end_src
+
+Es una API bastante sencilla llamada por systemd, y viendo al archivo HTML
+encontramos una página sencilla para enviar archivos, la cual está diseñada para
+guardar solo archivos de imágenes, además de que nos permite ejecutar comandos
+en el sistema para trabajar con estas imágenes. Ya podemos imaginarnos la
+vulnerabilidad.
+En el caso de que este servicio sea compartido o utilizado por un tercero,
+por ejemplo, una empresa socia, deberemos de notificarle también, por ejemplo,
+utilizando mail.
+
+En caso de que fuera de cara al cliente, deberemos de tener en cuenta la
+disponibilidad, y lanzaríamos otro servidor mientras este es verificado.
+Teniendo en cuenta la monitorización dado que este puede ser nuevamente atacado.
+
+Una vez estando seguros de que surgió un incidente, este ha sido chequeado,
+documentado y notificado, procederemos a la Erradicación, Contenciópn y
+Recuperación.
+
+** Erradicación, Contención y Recuperación
+
+Estando ahora seguros de la incidencia, antes de contener el incidente, debemos
+de obtener las mayores pruebas posibles, ya que el malware puede estar
+configurado para borrar evidencia si se desconecta el servidor de internet.
+
+*** Adquirir, Preservar, Asegurar y Documentar Evidencia
+
+Obtendremos tres principales artefactos, una imagen de disco, memoria y un poco
+de tráfico de internet (por si el malware se está conectando con un servidor
+externo malicioso). Para esto usaremos la muy querida herramienta =dd=.
+
+Para el disco:
+
+#+begin_src shell
+mkdir /tmp/forensics/
+fdisk -l
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+Disk /dev/xvda: 8 GiB, 8589934592 bytes, 16777216 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: gpt
+Disk identifier: E9F9B2E1-7EFE-3244-9E62-922BB5CC6DA7
+
+Device       Start      End  Sectors  Size Type
+/dev/xvda1  262144 16775167 16513024  7.9G Linux filesystem
+/dev/xvda14   2048     8191     6144    3M BIOS boot
+/dev/xvda15   8192   262143   253952  124M EFI System
+
+Partition table entries are not in disk order.
+#+end_src
+
+#+begin_src shell
+cd /tmp/forensics/
+# The Linux Filesystem partition
+dd if=/dev/xvda1 of=./disk_image.dd bs=2k
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+dd: error writing './disk_image.dd': No space left on device
+1490781+0 records in
+1490780+0 records out
+3053117440 bytes (3.1 GB, 2.8 GiB) copied, 45.3795 s, 67.3 MB/s
+#+end_src
+
+Tenemos un problema interesante, no hay espacio en el dispositivo para la imágen
+del disco, por lo que deberemos de enviar toda esta data directamente hacia la
+red, para esto, usaremos un Tunel de SSH y netcat.
+
+#+begin_src shell
+ssh -R 9003:localhost:9003 ec2-3-8-122-251.eu-west-2.compute.amazonaws.com
+#+end_src
+
+Luego, escuchamos en nuestra máquina:
+
+#+begin_src shell
+nc -l 9003 > disk.image
+#+end_src
+
+Y ejecutamos el dd:
+
+#+begin_src shell
+dd if=/dev/xvda bs=2k | nc localhost 9003
+#+end_src
+
+Estos tres comandos, aunque simples, nos permite pasar la imágen por red
+directamente a nuestra computadora, sin tener que configurar nuestra red local.
+
+Hay que tener mucho cuidado una vez termina, solo cancelar el comando por el
+lado del =dd=, es decir, utilizar C-c sin escribir nada extra, para evitar que la
+imagen se corrompa con data al final.
+
+192.168 being my local IP address.
+
+Ahora, para la RAM, especificamos cuánto extraeremos de la RAM, en este caso,
+queremos los 4GB de la máquina completos:
+
+#+begin_src shell
+cd /tmp/forensics/
+sudo dd if=/dev/mem of=memdump bs=1M count=4096
+#+end_src
+
+Este comando sin embargo, no funciona debido a no tener permisos para leer
+/dev/mem. Aunque se esté corriendo como el usuario root, probablemente bloqueos
+por parte de EC2. Por ende, utilizaremos LiME para extraer la RAM.
+
+#+begin_src shell
+sudo git clone https://github.com/504ensicsLabs/LiME /tmp/LiME
+#+end_src
+
+Instalamos las dependencias.
+
+#+begin_src shell
+sudo apt install linux-headers-$(uname -r) gcc make
+#+end_src
+
+Compilaremos LiME para usarlo:
+
+#+begin_src shell
+cd /tmp/LiME/src
+sudo make
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+make -C /lib/modules/6.1.0-12-cloud-amd64/build M="/tmp/LiME/src" modules
+make[1]: Entering directory '/usr/src/linux-headers-6.1.0-12-cloud-amd64'
+  LD [M]  /tmp/LiME/src/lime.ko
+  BTF [M] /tmp/LiME/src/lime.ko
+make[1]: Leaving directory '/usr/src/linux-headers-6.1.0-12-cloud-amd64'
+strip --strip-unneeded lime.ko
+mv lime.ko lime-6.1.0-12-cloud-amd64.ko
+#+end_src
+
+E instalaremos el modulo de LiME en el kernel:
+
+#+begin_src shell
+cd /tmp/LiME/src
+ls -l lime-6.1.0-12-cloud-amd64.ko
+file lime-6.1.0-12-cloud-amd64.ko
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+-rw-r--r-- 1 root root 27776 Oct 11 19:35 lime-6.1.0-12-cloud-amd64.ko
+lime-6.1.0-12-cloud-amd64.ko: ELF 64-bit LSB relocatable, x86-64, version 1 (SYSV), BuildID[sha1]=bd13814af03e4f533744236b6c3eea4f8a6a338d, not stripped
+#+end_src
+
+#+begin_src shell
+cd /tmp/LiME/src
+sudo insmod /tmp/LiME/src/lime-6.1.0-12-cloud-amd64.ko "path=../memory.mem format=lime"
+#+end_src
+
+Y pasar este dump hacia la computadora que hará el análisis:
+
+#+begin_src shell
+scp ec2-3-8-122-251.eu-west-2.compute.amazonaws.com:/tmp/LiME/memory.mem .
+#+end_src
+
+Y un poco de tráfico antes de hacer cualquier cosa:
+
+#+begin_src shell
+cd /tmp/forensics/
+tcpdump -i enX0 -w networkCapture.pcap
+#+end_src
+
+Como último paso, obtenemos los logs, ya sea por scp o nuestro preferido.
+
+Finalmente, pasaríamos todos estos archivos a un local, con una herramienta como scp.
+
+*** Contener el Incidente :ATTACH:
+:PROPERTIES:
+:ID:       68100a71-b0f8-44bf-a19f-dec4ac4d6d00
+:END:
+
+Una vez teniendo estos archivos, ya tenemos una captura del sistema en este
+punto de tiempo. Por lo que a este punto desconectamos el servidor de internet,
+ya sea deshabilitando la interfaz o, en este caso crear una regla que el
+servidor no puede conectarse con internet en outbound rules.
+
+Esto es para evitar cualquier posible flujo de datos maliciosos en proceso.
+Luego de esto, podemos analizar los archivos para asegurarnos que no hay
+intrusiones. Para disco, utilizaremos =sleuthkit=.
+
+#+begin_src shell
+ls
+#+end_src
+
+#+RESULTS:
+#+begin_src shell
+practicas
+#+end_src
+
+Una vez terminado el análisis del disco, pasaremos a analizarlo con Autopsy. Su
+instalación no está en el scope de este documento.
+
+Solo teniendo esta imágen, podemos ver incluso todo el estado de la máquina,
+incluyendo los logs, con esto podemos tener una idea de TODO lo que contuvo la
+máquina en ese tiempo.
+
+
+[[attachment:_20231012_150216screenshot.png]]
+
+Podemos ver todas las particiones del disco, además de la metadata de archivos.
+A este punto podemos analizar todo lo que necesitemos en el sistema, incluso la
+partición EFI, para revisar si existe un dual-boot con otro sistema como
+Windows.
+
+[[attachment:_20231012_150739screenshot.png]]
+
+La metadata contiene mucha información del archivo, teniendo en cuenta que las
+fotos actualmente guardan metadata de la localización, además del dispositivo en
+el que son enviados, por ejemplo, con los dispositivos iphone.
+
+A este punto ya tenemos una vista completa del sistema, todos sus servicios,
+archivos de configuración de este servicio y, de acuerdo a la incidencia,
+buscaremos ciertos tipos de archivos, revisaremos su metadata y veremos cuando
+han sido modificados, además de analizar por archivos que desconozcamos y puedan
+ser maliciosos.
+
+[[attachment:_20231012_151239screenshot.png]]
+
+Aquí podemos ver incluso detalles de la API, y su archivo main.
+
+Incluso pudiendo ver los archivos borrados del sistema si no han sido
+sobreescritos:
+
+
+[[attachment:_20231012_152114screenshot.png]]
+
+Adicionalmente, Autopsy hará un análisis y marcará archivos interesante, en este
+caso añadió archivos luks de encriptación, los cuales no son ninguna amenaza:
+
+
+[[attachment:_20231012_152304screenshot.png]]
+
+Dejaremos que autopsy termine el análisis completo de la imágen y, generaremos
+un reporte que incluirá todos los detalles de la versión y módulos utilizados.
+Deberemos guardar todos los archivos un tiempo luego de la incidencia.
+
+Luego, analizaremos la RAM. Teniendo el dump, podremos analizarla con volatility.
+
+[[attachment:_20231012_210906screenshot.png]]
+
+Tendremos también un reporte más detallado de estos análisis.
+
+Finalmente, los logs del sistema y tráfico de red.
+
+Los logs del sistema no contienen nada raro.
+
+- apt
+- cloud-init
+- dpkg
+
+[[attachment:_20231011_205753screenshot.png]]
+
+[[attachment:_20231011_205818screenshot.png]]
+
+[[attachment:_20231011_205831screenshot.png]]
+
+Analizando los logs de red, vemos que en ese punto no se analizó ningún paquete
+malicioso, ni se está hablando con un servidor desconocido.
+
+[[attachment:_20231011_205624screenshot.png]]
+
+A este punto podemos estar seguros que no hay incidentes, por supuesto detalles
+como conocer la red en la que estás trabajando son importantes a la hora de
+estar seguros. De acuerdo a esto, sabemos que fue un ataque de malware para
+interrupir el servicio. Por lo que también hemos identificado y mitigado las
+vulnerabilidades.
+
+*** Eliminar Malware y otros Componentes
+
+Antes de eliminar el malware, deberemos de obtener una copia, algo que
+afortunamente realizamos al analizar el malware con un método básico y avanzado,
+con ingeniería inversa.
+
+Terminado la eliminación de este malware con el comando =rm=, podemos seguir con los pasos.
+
+*** Revisar si existen más hosts afectados
+
+Trabajando en conjunto con el equipo, entenderemos si este servicio existe en
+otros servidores, y si es así, deberemos de repetir todo el proceso con estos
+servidores también.
+
+En el caso de que tuvieramos indicios de una intrusión, deberemos de investigar
+si este se ha transferido por la red, revisando los servidores vecinos en la
+topología.
+
+Al no haber indicios de intrución, al haber investigado incluso el tráfico de
+red, podemos seguir con el siguiente paso.
+
+*** Recuperación del Incidente
+
+A pesar de no ser un servicio de cara al cliente, internamente es utilizado, por
+lo que a este punto nos encargaremos de subir nuevamente un servidor, utilizando
+herramientas Infrastructure as Code para ayudarnos, si es necesario aplicando un
+parche, en nuestro caso, añadiendo validaciones a la API para evitar archivos
+que no sean del formato correcto. Esto sin embargo, es un parche, por lo que la
+mitigación completa estará en nuestro reporte como recomendaciones, además de
+añadir monitoreo al servidor.
+
+*** Dejar los sistemas afectados en un estado operativo
+
+El equipo afectado sigue funcionando, aunque en contención, es decir, fuera de
+la red. Puede ser utilizado para el análisis más adelante. Podemos probar la API
+y hacer los pasos por los cuales fue atacado el sistema, es decir, subir un
+archivo malicioso, y ver si este puede ser ejecutado (si existen privilegios).
+
+** Actividad Post-Incidente
+*** Crear un Informe de Seguimiento
+**** Resumen del Incidente
+
+- Fecha de Detección :: 10/06/2023
+- Naturaleza del Incidente :: Infección de Malware a través de una API insegura.
+- Equipo de Respuesta a Incidentes :: Capstone Grupo C4
+
+**** Acciones Tomadas
+
+***** Detección Inicial
+
+Detectado en la fecha 10/06/2023, un administrador fue notificado sobre un
+servidor caído, el cual contiene un servicio de API utilizado internamente.
+
+Al ver el servidor caído, investigó el servicio y encontró un archivo en un
+formato extraño subido, por lo que contactó al equipo de respuesta a incidentes
+el cual inmediatamente se conecto al servidor para las primeras comprobaciones.
+
+Al identificarse como un incidente, el equipo de incidentes decidió contener el
+incidente.
+
+***** Contención Inmediata
+
+Se desconectó del equipo de producción el servidor afectado, se revisó en
+detalle la máquina, para estar seguros de que el malware no se haya propagado.
+
+***** Investigación
+
+Al confirmarse que no se ha propagado el malware, obtuvimos una copia de este
+para su análisis en un entorno seguro. Se realizaron análisis e ingeniería
+inversa para entender a fondo este malware y su objetivo.
+
+***** Parcheo del Servidor
+
+Al ser un servicio utilizado internamente, se realizó un parcheo para poder
+subir un nuevo servidor con este servicio y un parche, una validación para
+evitar formatos que no sean del tipo esperado, además de añadir monitoreo. Se
+añadieron más detalles de la mitigación completa, el cual consiste en un trabajo
+más a detalle de desarrollo, en las recomendaciones de este reporte.
+
+**** Cronograma
+
+- 10/06/2023-13:01 El Administrador recibe la notificación del servidor caído
+- 10/06/2023-13:10 El Administrador notifica al equipo de respuesta a incidente.
+- 10/06/2023-13:18 El Equipo de respuesta a incidentes hace las comprobaciones
+  iniciales y concluye que se trata de un incidente.
+- 10/06/2023-13:21 El equipo de respuesta a incidentes obtiene los detalles del
+  servidor, imágenes y logs, y desconecta el servidor de la red de producción.
+- 10/06/2023-13:31 El equipo de respuesta a incidentes sube un nuevo servidor
+  con monitoreo y un parche temporal para el uso del equipo interno. Se asegura
+  que el incidente no haya afectado a otros servidores en la red.
+- 10/06/2023-13:38 El equipo de respuesta a incidentes genera recomendaciones
+  para la mitigación total de la incidencia, y genera un reporte detallado de
+  todo este proceso.
+
+*** Realizar un reunión de lecciones aprendidas
+
+Opcional para incidencias menores, en nuestro caso necesario, en donde le
+daremos los detalles a todos los involucrados, al equipo de infraestructure,
+al equipo de desarrollo que trabajará en los exploits, al administrador del
+sistema, etc. Aquí se presentará la incidencia y las recomendaciones finales, y
+se especificarán los siguientes pasos como respuesta a este incidente.
+
+** Recomendaciones Finales
+
+Durante el análisis de esta incidencia, se encontraron ciertos elementos en los
+que se puede mejorar a futuro, que funcionarán para tener una arquitectura más
+segura, además de mitigar este y futuros incidentes.
+
+*** Recomendaciones de la API
+
+1. Añadir validaciones al HTML, además de en la API para la API, asegurandose
+   que solo se están pasando imágenes a la API.
+2. Eliminar o asegurar el método de la API que permite ejecutar comandos en el
+   servidor. Es decir, si es necesario esta función, limitar los comandos que se
+   puede usar.
+
+*** Recomendaciones de la Infraestructura
+
+1. Evitar la instalación de paquetes innecesarios, en este caso, dotnet, el cual
+   fue utilizado para ejecutar un malware.
+2. Ejecutar la API no con el usuario root, si no con uno con acciones limitadas.
+3. Aumentar el logeo de nginx y monitorización de la API para tener detalles de
+   las requests.
+
+El aumento de logeo específicamente nos ayudará en futuros preguntas o
+incidencias, permitiendonos tener una visión de los requests maliciosos que se
+hagan a la API.
+** Conclusiones
+
+Con estas recomendaciones, el equipo de incidencias trabajará con los equipos
+relacionados, con el administrador del sistema por el lado de infraestructura y,
+con desarrolladores para mitigar la API, además de equipo QA para probar el
+servicio y, posteriormente probar nuevamente la vulnerabilidad, asegurandosé así
+de que este completamente mitigada.
