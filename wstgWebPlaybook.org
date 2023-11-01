@@ -1,0 +1,40 @@
+#+title: Wstg Web Playbook
+
+* What is this?
+
+An OWASP WSTG Testing framework based org file, introducing a playbook that can be played against a domain to test it.
+
+This will be a way to consistently, repeatebly and have a defined approach to testing web applications with the most simplest tools available possible. With CLI tools when possible.
+
+* Principles of Testing
+
+- Security is a process and not a product.
+- Think Strategically, Not Tactically. As the window of vulnerability is roughly a year.
+- The SDLC is King
+- Test early and Test Often
+- Test Automation, leverage SAST, DAST and SCA. Dependency tracking tools and so on.
+- Understand the Scope of Security, the assets that are to be protected should be given a classification that states how they are to be handled. Discussions should occur with legal council to ensure that any specific security requirements will be met.
+- Test outside the box, with the basics in mind.
+- Understand the Subject, we need to require accurate documentation of the application. The architecture, data-flow diagrams, use cases, etc. should be recorded in formal documents and made available for review.
+- Use the right tools, see if they are updated on how.
+- Careful for false positives.
+- Use Source Code when available.
+- Develop Metrics to determine if things are getting better. IEEE is a good starting point.
+- Document the Test Results.
+
+* Testing Techniques Explained
+
+** Manual Inspections and Reviews
+
+The most powerful type, as it can assess the security process that a development, by checking at their documentation and understanding the context.
+
+- Advantages
+  - Require no supporting technology
+  - Can be applied to a variety of situations
+  - Flexible
+  - Promotes teamwork
+  - Early in the SDLC
+- Disadvantages
+  - Time-consuming
+  - Supporting material not always available
+  - R
